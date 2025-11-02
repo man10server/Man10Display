@@ -1145,9 +1145,11 @@ open class Display() : MapPacketSender {
     private fun startVideoServer(port: Int = 0) {
         stopVideoServer()
         if (port == 0) {
+            info("Display.startVideoServer: ポートが0のため、ストリームサーバーを起動しません")
             return
         }
         try {
+            info("Display.startVideoServer: ポート $port でストリームサーバーを起動中...")
             videoCaptureServer = VideoCaptureServer(port)
             videoCaptureServer?.onFrame(Consumer { image ->
                 this.frameReceivedCount = videoCaptureServer?.frameReceivedCount ?: 0
@@ -1167,8 +1169,10 @@ open class Display() : MapPacketSender {
                 refresh()
             })
             videoCaptureServer?.start()
+            info("Display.startVideoServer: ストリームサーバー起動成功 (ポート=$port, ディスプレイ=$name)")
         } catch (e: Exception) {
-            error(e.message!!)
+            error("Display.startVideoServer: ストリームサーバー起動失敗 (ポート=$port) - ${e.javaClass.simpleName}: ${e.message}")
+            e.printStackTrace()
             stopVideoServer()
             return
         }

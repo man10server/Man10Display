@@ -9,6 +9,12 @@ fun info(message: String, sender: CommandSender? = null) {
     sender?.sendMessage(message)
 }
 
+// 警告ログ
+fun warning(message: String, sender: CommandSender? = null) {
+    Bukkit.getLogger().warning(Main.prefix + message)
+    sender?.sendMessage(message)
+}
+
 // エラーログ
 fun error(message: String, sender: CommandSender? = null) {
     Bukkit.getLogger().severe(Main.prefix + message)

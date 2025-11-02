@@ -59,9 +59,16 @@ interface MapPacketSender {
             runCatching { Class.forName("net.minecraft.world.level.saveddata.maps.MapDecoration") }.getOrNull()
         }
 
+        private var lastLogTime: Long = 0
+        private var lastPacketCount: Long = 0
+        private val logInterval: Long = 5000 // 5秒ごとにログ出力
+        private var totalPacketsSent: Long = 0
+        private var totalPacketsErrors: Long = 0
+        
         fun send(players: List<Player>, packets: List<PacketContainer>): Int {
             var sent = 0
             var errors = 0
+            val startTime = System.currentTimeMillis()
             safeLog("INFO", "Sending ${packets.size} packets to ${players.size} players")
             
             // プレイヤーが参加完了しているか確認（参加直後の場合は少し待つ）
@@ -70,11 +77,11 @@ interface MapPacketSender {
                     safeLog("WARN", "Player ${player.name} is not online, skipping")
                     false
                 } else {
-                    // プレイヤーが参加してから1秒以上経過しているか確認
+                    // プレイヤーが参加してから3秒以上経過しているか確認（1秒から3秒に延長）
                     val joinTime = player.firstPlayed
                     val currentTime = System.currentTimeMillis()
                     val timeSinceJoin = currentTime - joinTime
-                    if (timeSinceJoin < 1000) {
+                    if (timeSinceJoin < 3000) {
                         safeLog("WARN", "Player ${player.name} joined recently (${timeSinceJoin}ms ago), skipping to avoid disconnect")
                         false
                     } else {
@@ -90,35 +97,80 @@ interface MapPacketSender {
             
             safeLog("INFO", "Sending packets to ${onlinePlayers.size} eligible players")
             
+            // 一度に送信するパケット数を制限（クライアントの処理能力を考慮）
+            val batchSize = 10 // 一度に10個のパケットを送信
+            val delayBetweenBatches = 50L // バッチ間の遅延（ミリ秒）
+            
             for (player in onlinePlayers) {
                 safeLog("INFO", "Sending packets to player ${player.name} (${packets.size} packets)")
                 var playerSent = 0
                 var playerErrors = 0
-                for ((index, packet) in packets.withIndex()) {
-                    try {
-                        if (!player.isOnline) {
-                            safeLog("WARN", "Player ${player.name} went offline during packet send (packet $index)")
-                            break
+                
+                // パケットをバッチに分割して送信
+                for (batchStart in packets.indices step batchSize) {
+                    if (!player.isOnline) {
+                        safeLog("WARN", "Player ${player.name} went offline during packet send (batch starting at $batchStart)")
+                        break
+                    }
+                    
+                    val batchEnd = minOf(batchStart + batchSize, packets.size)
+                    val batch = packets.subList(batchStart, batchEnd)
+                    
+                    for ((index, packet) in batch.withIndex()) {
+                        try {
+                            if (!player.isOnline) {
+                                safeLog("WARN", "Player ${player.name} went offline during packet send (packet ${batchStart + index})")
+                                break
+                            }
+                            Main.protocolManager.sendServerPacket(player, packet)
+                            playerSent++
+                            sent++
+                            totalPacketsSent++
+                            
+                            // パケット送信ログ（定期的に）
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastLogTime >= logInterval) {
+                                val timeDiff = currentTime - lastLogTime
+                                val packetDiff = totalPacketsSent - lastPacketCount
+                                val pps = if (packetDiff > 0 && timeDiff > 0) {
+                                    String.format("%.2f", packetDiff * 1000.0 / timeDiff)
+                                } else {
+                                    "0.00"
+                                }
+                                safeLog("INFO", "📤 パケット送信: 累計送信=$totalPacketsSent, 累計エラー=$totalPacketsErrors, 送信速度=$pps パケット/秒")
+                                lastLogTime = currentTime
+                                lastPacketCount = totalPacketsSent
+                            }
+                        } catch (ex: Exception) {
+                            errors++
+                            playerErrors++
+                            totalPacketsErrors++
+                            safeLog("ERROR", "Packet send failed to ${player.name} (packet ${batchStart + index}/${packets.size}): ${ex.javaClass.simpleName} - ${ex.message}")
+                            if (errors <= 3) { // 最初の3エラーだけスタックトレース
+                                ex.printStackTrace()
+                            }
+                            // プレイヤーが切断された場合は、以降のパケット送信をスキップ
+                            if (ex.message?.contains("disconnect") == true || ex.message?.contains("closed") == true) {
+                                safeLog("WARN", "Player ${player.name} disconnected during packet send, stopping")
+                                break
+                            }
                         }
-                        Main.protocolManager.sendServerPacket(player, packet)
-                        playerSent++
-                        sent++
-                    } catch (ex: Exception) {
-                        errors++
-                        playerErrors++
-                        safeLog("ERROR", "Packet send failed to ${player.name} (packet $index/${packets.size}): ${ex.javaClass.simpleName} - ${ex.message}")
-                        if (errors <= 3) { // 最初の3エラーだけスタックトレース
-                            ex.printStackTrace()
-                        }
-                        // プレイヤーが切断された場合は、以降のパケット送信をスキップ
-                        if (ex.message?.contains("disconnect") == true || ex.message?.contains("closed") == true) {
-                            safeLog("WARN", "Player ${player.name} disconnected during packet send, stopping")
-                            break
+                    }
+                    
+                    // バッチ間の遅延（最後のバッチ以外）
+                    if (batchEnd < packets.size) {
+                        try {
+                            Thread.sleep(delayBetweenBatches)
+                        } catch (_: InterruptedException) {
+                            // 中断された場合は続行
                         }
                     }
                 }
                 safeLog("INFO", "Finished sending packets to player ${player.name}: sent=$playerSent/${packets.size}, errors=$playerErrors")
             }
+            val endTime = System.currentTimeMillis()
+            val duration = endTime - startTime
+            safeLog("INFO", "📤 パケット送信完了: 送信=$sent, エラー=$errors, 所要時間=${duration}ms, 送信速度=${if (sent > 0 && duration > 0) String.format("%.2f", sent * 1000.0 / duration) else "0.00"} パケット/秒")
             safeLog("INFO", "Packet send complete: sent=$sent, errors=$errors")
             return sent
         }
@@ -128,7 +180,8 @@ interface MapPacketSender {
             safeLog("INFO", "Creating MAP packet: mapId=$mapId, dataSize=${data.size}")
 
             val packet = PacketContainer(PacketType.Play.Server.MAP)
-            packet.modifier.writeDefaults()
+            // writeDefaults()は呼ばない（デフォルト値が間違っている可能性があるため）
+            // packet.modifier.writeDefaults()
 
             val ints = packet.integers
             val bools = packet.booleans
@@ -149,7 +202,9 @@ interface MapPacketSender {
             }
 
             safeLog("INFO", "Writing MapPatch...")
-            val wrotePatch = writeMapPatch(packet, data) || writeMapPatchFallback(packet, data)
+            val wrotePatch = writeMapPatch(packet, data)
+            // writeMapPatchFallbackは使わない（データが重複して書き込まれる可能性があるため）
+            // || writeMapPatchFallback(packet, data)
             if (wrotePatch) {
                 safeLog("INFO", "MapPatch write: SUCCESS")
             } else {
@@ -238,7 +293,7 @@ interface MapPacketSender {
         }
 
         private fun writeMapPatch(packet: PacketContainer, data: ByteArray): Boolean {
-            val patch = createMapPatch(PATCH_WIDTH, PATCH_HEIGHT, 0, 0, data)
+            val patch = createMapPatch(0, 0, PATCH_WIDTH, PATCH_HEIGHT, data)
             if (patch == null) {
                 safeLog("WARN", "MapPatch creation failed")
                 return false
@@ -314,32 +369,32 @@ interface MapPacketSender {
                  }
                  val current = optionalValue?.orElse(null)
 
-                 // MapPatch用のOptional<Collection<MapPatch>>フィールドか確認
+                 // MapPatch用のOptional<MapPatch>フィールドか確認（優先）
+                 if (!wrotePatch && (matchesType(innerType, patchClass) || (current != null && patchClass.isInstance(current)))) {
+                     try {
+                         @Suppress("UNCHECKED_CAST")
+                         val optionalObj = Optional.of(patch) as Optional<Any?>
+                         modifier.write(index, optionalObj)
+                         safeLog("INFO", "MapPatch written to Optional<MapPatch> field[$index]")
+                         wrotePatch = true
+                         continue
+                     } catch (e: Exception) {
+                         safeLog("WARN", "MapPatch write to Optional<MapPatch> field[$index] failed: ${e.javaClass.simpleName} - ${e.message}")
+                     }
+                 }
+
+                 // MapPatch用のOptional<Collection<MapPatch>>フィールドか確認（フォールバック）
                  if (!wrotePatch && matchesCollectionOf(innerType, patchClass)) {
                      try {
                          // Collection<MapPatch>を作成してOptionalでラップ
                          val collection = java.util.ArrayList<Any>()
                          collection.add(patch)
                          ProtocolLibHelpers.writeOptionalCollectionToField(packet, index, collection)
-                         safeLog("INFO", "MapPatch written to Optional<Collection<MapPatch>> field[$index]")
+                         safeLog("INFO", "MapPatch written to Optional<Collection<MapPatch>> field[$index] (fallback)")
                          wrotePatch = true
                          continue
                      } catch (e: Exception) {
-                         safeLog("WARN", "MapPatch write to field[$index] failed: ${e.javaClass.simpleName} - ${e.message}")
-                     }
-                 }
-
-                 // MapPatch用のOptional<MapPatch>フィールドか確認（フォールバック）
-                 if (!wrotePatch && (matchesType(innerType, patchClass) || (current != null && patchClass.isInstance(current)))) {
-                     try {
-                         @Suppress("UNCHECKED_CAST")
-                         val optionalObj = Optional.of(patch) as Optional<Any?>
-                         modifier.write(index, optionalObj)
-                         safeLog("INFO", "MapPatch written to Optional<MapPatch> field[$index] (fallback)")
-                         wrotePatch = true
-                         continue
-                     } catch (e: Exception) {
-                         safeLog("WARN", "MapPatch write to field[$index] failed: ${e.javaClass.simpleName}")
+                         safeLog("WARN", "MapPatch write to Optional<Collection<MapPatch>> field[$index] failed: ${e.javaClass.simpleName} - ${e.message}")
                      }
                  }
 
@@ -351,6 +406,7 @@ interface MapPacketSender {
                          @Suppress("UNCHECKED_CAST")
                          val emptyOptional = Optional.empty<Any?>() as Optional<Any?>
                          modifier.write(index, emptyOptional)
+                         safeLog("INFO", "MapDecoration Optional field[$index] set to empty")
                      } catch (_: Exception) {
                      }
                  }
@@ -371,13 +427,13 @@ interface MapPacketSender {
         }
 
         private fun createMapPatch(
-            width: Int,
-            height: Int,
             x: Int,
             y: Int,
+            width: Int,
+            height: Int,
             data: ByteArray
         ): Any? = mapPatchConstructor?.let { ctor ->
-            runCatching { ctor.newInstance(width, height, x, y, data) }.getOrNull()
+            runCatching { ctor.newInstance(x, y, width, height, data) }.getOrNull()
         }
 
         private fun logStructure(
