@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.jetbrains.kotlin.jvm' version '1.8.0-RC'
+    id 'org.jetbrains.kotlin.jvm' version '2.0.0'
 }
 
 group = 'red.man10'
@@ -8,23 +8,45 @@ version = '2.0'
 
 repositories {
     mavenCentral()
-    maven {name = 'papermc-repo'
-    url = 'https://repo.papermc.io/repository/maven-public/'
+    maven {
+        name = 'papermc-repo'
+        url = 'https://repo.papermc.io/repository/maven-public/'
     }
     maven {
         url 'https://jitpack.io'
+    }
+    maven {
+        name = 'placeholderapi'
+        url = 'https://repo.extendedclip.com/content/repositories/placeholderapi/'
+    }
+    maven {
+        name = 'dmulloy2-repo'
+        url = 'https://repo.dmulloy2.net/repository/public/'
+    }
+    maven {
+        name = 'dmulloy2-snapshots'
+        url = 'https://repo.dmulloy2.net/repository/snapshots/'
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
     }
 }
 
 dependencies {
     compileOnly fileTree(dir: 'libs', include: '*.jar')
-    compileOnly("io.papermc.paper:paper-api:1.20.4-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
     api "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
     compileOnly 'com.github.dmulloy2:ProtocolLib:5.0.0'
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     compileOnly 'com.github.tororo1066.ItemFrameProtector:API:83c9fea53b'
+    compileOnly ("com.github.MilkBowl:VaultAPI:1.7") {
+        exclude group: 'org.bukkit', module: 'bukkit'
+    }
 }
-def targetJavaVersion = 17
+def targetJavaVersion = 21
 java {
     def javaVersion = JavaVersion.toVersion(targetJavaVersion)
     sourceCompatibility = javaVersion
@@ -50,18 +72,19 @@ processResources {
 }
 compileKotlin {
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "21"
     }
 }
 compileTestKotlin {
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "21"
     }
 }
 jar {
+    // ランタイム必要分のみを同梱（ProtocolLibはcompileOnlyのため同梱されない）
     duplicatesStrategy= DuplicatesStrategy.EXCLUDE
     from {
-        configurations.compileClasspath.collect { // .jarファイルに含める
+        configurations.runtimeClasspath.collect {
             it.isDirectory() ? it : zipTree(it)
         }
     }

@@ -190,10 +190,22 @@ open class Display() : MapPacketSender {
 
 
     open fun deinit() {
-        this.refreshFlag = false
-        this.packetCache.clear()
-        stopVideoServer()
-        stopVideoSendingPacketsTask()
+        try {
+            info("Display.deinit() START")
+            this.refreshFlag = false
+            info("Display.deinit() refreshFlag set to false")
+            this.packetCache.clear()
+            info("Display.deinit() packetCache cleared")
+            stopVideoServer()
+            info("Display.deinit() stopVideoServer() completed")
+            stopVideoSendingPacketsTask()
+            info("Display.deinit() stopVideoSendingPacketsTask() completed")
+            info("Display.deinit() END: completed successfully")
+        } catch (e: Exception) {
+            error("Display.deinit() CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
     }
 
     // endregion
@@ -915,8 +927,15 @@ open class Display() : MapPacketSender {
     }
 
     private fun stopVideoSendingPacketsTask() {
-        future?.cancel(false)
-        future = null
+        try {
+            info("Display.stopVideoSendingPacketsTask() START")
+            future?.cancel(false)
+            future = null
+            info("Display.stopVideoSendingPacketsTask() END: completed successfully")
+        } catch (e: Exception) {
+            error("Display.stopVideoSendingPacketsTask() CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+        }
     }
 
     private fun sendBlank() {
@@ -1015,10 +1034,21 @@ open class Display() : MapPacketSender {
     }
 
     fun clearCache() {
-        packetCache.clear()
-        // blankを再作成
-        val blankImage = BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB)
-        createPacketCache(blankImage, "blank")
+        try {
+            info("Display.clearCache() START")
+            packetCache.clear()
+            info("Display.clearCache() packetCache cleared")
+            // blankを再作成
+            val blankImage = BufferedImage(imageWidth, imageHeight, BufferedImage.TYPE_INT_RGB)
+            info("Display.clearCache() blankImage created, creating packet cache...")
+            createPacketCache(blankImage, "blank")
+            info("Display.clearCache() packet cache created")
+            info("Display.clearCache() END: completed successfully")
+        } catch (e: Exception) {
+            error("Display.clearCache() CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
     }
 
     fun refresh() {
@@ -1068,7 +1098,16 @@ open class Display() : MapPacketSender {
     // endregion
     // region: Macro
     fun stop() {
-        macroEngine.stop()
+        try {
+            info("Display.stop() START")
+            macroEngine.stop()
+            info("Display.stop() macroEngine.stop() completed")
+            info("Display.stop() END: completed successfully")
+        } catch (e: Exception) {
+            error("Display.stop() CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
     }
 
     fun runMacro(macroName: String, sender: CommandSender? = null): Boolean {
@@ -1136,8 +1175,15 @@ open class Display() : MapPacketSender {
     }
 
     fun stopVideoServer() {
-        videoCaptureServer?.deinit()
-        videoCaptureServer = null
+        try {
+            info("Display.stopVideoServer() START")
+            videoCaptureServer?.deinit()
+            videoCaptureServer = null
+            info("Display.stopVideoServer() END: completed successfully")
+        } catch (e: Exception) {
+            error("Display.stopVideoServer() CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+        }
     }
 
     fun resetVideoStats() {

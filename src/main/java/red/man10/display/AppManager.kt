@@ -59,8 +59,17 @@ class AppPlayerData {
 
 
     fun stop() {
-        app?.stop()
-        app = null
+        try {
+            info("AppPlayerData.stop() START")
+            app?.stop()
+            info("AppPlayerData.stop() app?.stop() completed")
+            app = null
+            info("AppPlayerData.stop() END: completed successfully")
+        } catch (e: Exception) {
+            error("AppPlayerData.stop() CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
     }
 }
 
@@ -114,24 +123,47 @@ class AppManager(var plugin: JavaPlugin) : Listener {
 
     // inventoryの中の地図のIDをすべて書き換える
     private fun updateInventoryMap(player: Player, mapId: Int) {
-        info("updateInventoryMap $mapId")
-        val inventory = player.inventory
-        for (i in 0 until inventory.size) {
-            val item = inventory.getItem(i) ?: continue
-            updateMapId(item, mapId)
+        try {
+            info("updateInventoryMap START: player=${player.name}, mapId=$mapId")
+            val inventory = player.inventory
+            info("updateInventoryMap: inventory obtained, size=${inventory.size}")
+            
+            for (i in 0 until inventory.size) {
+                try {
+                    val item = inventory.getItem(i)
+                    if (item != null && item.type == Material.FILLED_MAP) {
+                        info("updateInventoryMap: found FILLED_MAP at slot $i")
+                        updateMapId(item, mapId)
+                        info("updateInventoryMap: mapId updated for slot $i")
+                    }
+                } catch (e: Exception) {
+                    error("updateInventoryMap: error updating slot $i: ${e.javaClass.simpleName}")
+                }
+            }
+            info("updateInventoryMap END: completed successfully")
+        } catch (e: Exception) {
+            error("updateInventoryMap CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+            throw e
         }
     }
 
     private fun updateMapId(item: ItemStack, mapId: Int): Boolean {
-        if (item.type != Material.FILLED_MAP) {
-            return false
+        try {
+            if (item.type != Material.FILLED_MAP) {
+                return false
+            }
+            val meta = item.itemMeta
+            val pd = meta?.persistentDataContainer ?: return false
+            // key指定がないものは無視
+            val key = getAppKey(item) ?: return false
+            item.setMapId(mapId)
+            return true
+        } catch (e: Exception) {
+            error("updateMapId CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+            throw e
         }
-        val meta = item.itemMeta
-        val pd = meta?.persistentDataContainer ?: return false
-        // key指定がないものは無視
-        val key = getAppKey(item) ?: return false
-        item.setMapId(mapId)
-        return true
     }
 
     fun getAppKey(item: ItemStack): String? {
@@ -233,30 +265,59 @@ class AppManager(var plugin: JavaPlugin) : Listener {
     // ログインイベント
     @EventHandler
     fun onPlayerJoin(e: PlayerJoinEvent) {
-        //  info("Player Join ${e.player.name}")
-        val player = e.player
-        playerData[player.uniqueId] = AppPlayerData()
-        var mapId = getFreeMapId()
-        playerData[player.uniqueId]?.mapId = mapId
-        info("${player.name} got mapId: $mapId ")
+        try {
+            info("onPlayerJoin START: player=${e.player.name}")
+            val player = e.player
+            playerData[player.uniqueId] = AppPlayerData()
+            info("onPlayerJoin: AppPlayerData created")
+            var mapId = getFreeMapId()
+            playerData[player.uniqueId]?.mapId = mapId
+            info("${player.name} got mapId: $mapId ")
 
-        // 3秒後にプレイヤーのインベントリの地図のIDを書き換える
-        Bukkit.getScheduler().runTaskLater(Main.plugin, Runnable {
-            updateInventoryMap(player, mapId!!)
-
-            var item = player.inventory.itemInMainHand
-            startMapItemTask(player, item)
-        }, 20L * 3)
+            // 3秒後にプレイヤーのインベントリの地図のIDを書き換える
+            info("onPlayerJoin: scheduling task for 3 seconds later...")
+            Bukkit.getScheduler().runTaskLater(Main.plugin, Runnable {
+                try {
+                    info("onPlayerJoin scheduled task START: player=${player.name}")
+                    updateInventoryMap(player, mapId!!)
+                    info("onPlayerJoin scheduled task: updateInventoryMap completed")
+                    
+                    var item = player.inventory.itemInMainHand
+                    info("onPlayerJoin scheduled task: itemInMainHand=${item?.type}, calling startMapItemTask...")
+                    startMapItemTask(player, item)
+                    info("onPlayerJoin scheduled task END: completed successfully")
+                } catch (e: Exception) {
+                    error("onPlayerJoin scheduled task CRASH: ${e.javaClass.simpleName} - ${e.message}")
+                    e.printStackTrace()
+                }
+            }, 20L * 3)
+            info("onPlayerJoin END: scheduled task registered")
+        } catch (e: Exception) {
+            error("onPlayerJoin CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+        }
     }
 
     @EventHandler
     fun onPlayerQuit(e: PlayerQuitEvent) {
-        val player = e.player
-        //     info("Player Quit ${player.name}")
-        val data = playerData[player.uniqueId] ?: return
-        data.stop()
-        // プレイヤーデータを削除
-        playerData.remove(player.uniqueId)
+        try {
+            val player = e.player
+            info("onPlayerQuit START: player=${player.name}")
+            val data = playerData[player.uniqueId]
+            if (data == null) {
+                info("onPlayerQuit: playerData not found for ${player.name}")
+                return
+            }
+            info("onPlayerQuit: playerData found, stopping...")
+            data.stop()
+            info("onPlayerQuit: data.stop() completed")
+            // プレイヤーデータを削除
+            playerData.remove(player.uniqueId)
+            info("onPlayerQuit END: playerData removed successfully")
+        } catch (e: Exception) {
+            error("onPlayerQuit CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+        }
     }
 
     @EventHandler
@@ -331,41 +392,92 @@ class AppManager(var plugin: JavaPlugin) : Listener {
 
 
     fun startMapItemTask(player: Player, item: ItemStack) {
-        info("startMapItemTask")
-        val data = playerData[player.uniqueId] ?: return
-        data.stop()
-        // 地図以外は無視
-        if (item.type != Material.FILLED_MAP) {
-            return
-        }
-        val key = getAppKey(item) ?: return
-        var mapId = data.mapId
-        if (mapId == null) {
-            error("cant get mapId ${player.name}")
-            data.mapId = getFreeMapId()
-            mapId = data.mapId
-        }
-        item.setMapId(mapId!!)
-        val image = getAppImage(item)
-        if (image != null) {
-            info("image $image")
-            data.app = App(mapId, player, "image")
-            data.app!!.startImageTask(image, player)
-        }
+        try {
+            info("startMapItemTask START: player=${player.name}, item=${item.type}")
+            val data = playerData[player.uniqueId]
+            if (data == null) {
+                error("startMapItemTask: playerData not found for ${player.name}")
+                return
+            }
+            info("startMapItemTask: playerData found, stopping...")
+            data.stop()
+            info("startMapItemTask: data.stop() completed")
+            
+            // 地図以外は無視
+            if (item.type != Material.FILLED_MAP) {
+                info("startMapItemTask: item is not FILLED_MAP (${item.type}), returning")
+                return
+            }
+            info("startMapItemTask: item is FILLED_MAP, getting app key...")
+            
+            val key = getAppKey(item)
+            if (key == null) {
+                info("startMapItemTask: getAppKey returned null, returning")
+                return
+            }
+            info("startMapItemTask: app key=$key")
+            
+            var mapId = data.mapId
+            if (mapId == null) {
+                error("startMapItemTask: cant get mapId ${player.name}")
+                info("startMapItemTask: getting free mapId...")
+                data.mapId = getFreeMapId()
+                mapId = data.mapId
+                info("startMapItemTask: got free mapId=$mapId")
+            } else {
+                info("startMapItemTask: using existing mapId=$mapId")
+            }
+            
+            info("startMapItemTask: setting mapId to item...")
+            item.setMapId(mapId!!)
+            info("startMapItemTask: mapId set successfully")
+            
+            val image = getAppImage(item)
+            if (image != null) {
+                info("startMapItemTask: image found=$image, starting image task...")
+                data.app = App(mapId, player, "image")
+                info("startMapItemTask: App created, starting image task...")
+                data.app!!.startImageTask(image, player)
+                info("startMapItemTask: image task started")
+            } else {
+                info("startMapItemTask: no image found")
+            }
 
-        val macro = getAppMacro(item)
-        if (macro != null) {
-            info("macro $macro")
-            data.app = App(mapId, player, "macro")
-            data.app!!.runMacro(macro)
+            val macro = getAppMacro(item)
+            if (macro != null) {
+                info("startMapItemTask: macro found=$macro, running macro...")
+                data.app = App(mapId, player, "macro")
+                info("startMapItemTask: App created, running macro...")
+                data.app!!.runMacro(macro)
+                info("startMapItemTask: macro running")
+            } else {
+                info("startMapItemTask: no macro found")
+            }
+            
+            info("startMapItemTask END: completed successfully")
+        } catch (e: Exception) {
+            error("startMapItemTask CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+            throw e
         }
-
     }
 
     @EventHandler
     fun onItemHeld(e: PlayerItemHeldEvent) {
-        val item = e.player.inventory.getItem(e.newSlot) ?: return
-        startMapItemTask(e.player, item)
+        try {
+            info("onItemHeld START: player=${e.player.name}, newSlot=${e.newSlot}")
+            val item = e.player.inventory.getItem(e.newSlot)
+            if (item == null) {
+                info("onItemHeld: item is null at slot ${e.newSlot}, returning")
+                return
+            }
+            info("onItemHeld: item found, type=${item.type}, calling startMapItemTask...")
+            startMapItemTask(e.player, item)
+            info("onItemHeld END: completed successfully")
+        } catch (e: Exception) {
+            error("onItemHeld CRASH: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
+        }
     }
 
     @EventHandler
